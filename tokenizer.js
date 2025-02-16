@@ -34,5 +34,5 @@ class Tokenizer {
 }
 
 const tokenizer = new Tokenizer();
-const text = "I'm running and jumped over boxes. The box was huge!";
+const text = "Cities are running and dropping boxes. The boxes have been moved. She goes and went there.";
 console.log(tokenizer.tokenize(text))
