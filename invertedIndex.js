@@ -36,20 +36,18 @@ class InvertedIndex {
     })
 
   }
-  searchDocument(query) {
+  searchDocument(query, searchType = 'OR') {
     const tokens = this.tokenizer.tokenize(query);
 
     // for each token get all the documents containing it
     const matchingDocs = new Map();
-
+    // collect the matching documents
     tokens.forEach(token => {
-      // get all the documents with this token
       const documentsWithToken = this.index.get(token);
 
       if (documentsWithToken) {
-        // for each doc containing this token
         documentsWithToken.forEach((docInfo, docId) => {
-          if (!matchingDocs.has(docInfo)) {
+          if (!matchingDocs.has(docId)) {
             matchingDocs.set(docId, {
               matchCount: 1,
               terms: [token],
@@ -66,6 +64,28 @@ class InvertedIndex {
         })
       }
     })
+    // filter based on search type
+    const results = new Map();
+    matchingDocs.forEach((matchInfo, docId) => {
+      if (searchType === 'AND' && matchInfo.matchCount === tokens.length) {
+        // document contains ALL search terms
+        results.set(docId, matchInfo);
+      }
+      else if (searchType === 'OR') {
+        // contains ANY search term
+        results.set(docId, matchInfo);
+      }
+    })
+    return results;
+
   }
 }
 
+const index = new InvertedIndex();
+
+index.addDocument(1, "The cat chases mice");
+index.addDocument(2, "The playful mice");
+index.addDocument(3, "The cat sleeps");
+
+const results = index.searchDocument("cat mouse", "AND");
+console.log(results);

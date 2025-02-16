@@ -33,8 +33,4 @@ class Tokenizer {
   }
 }
 
-const tokenizer = new Tokenizer();
-const text = "Cities are running and dropping boxes. The boxes have been moved. She goes and went there.";
-console.log(tokenizer.tokenize(text))
-
 module.exports = Tokenizer;
