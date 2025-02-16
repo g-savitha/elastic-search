@@ -1,9 +1,11 @@
+const Stemmer = require('./stemmer');
 class Tokenizer {
   constructor() {
+    this.stemmer = new Stemmer();
     // common contractions we might encounter
     this.contractions = {
       "won't": "will not",
-      "can't": "can not",
+      "can't": "cannot",
       "i'm": "i am",
       "i'll": "i will",
       "i'd": "i would",
@@ -25,12 +27,12 @@ class Tokenizer {
     // remove punctuations
     text = text.replace(/[.,!?;:'"()]/g, '');
 
-    // split into tokens and remove empty strings
-    return text.split(' ').filter(token => token.length > 0)
+    // split into tokens, remove empty strings and apply stemming
+    return text.split(' ').filter(token => token.length > 0).map(token => this.stemmer.stem(token));
 
   }
 }
 
 const tokenizer = new Tokenizer();
-const text = "I'm writing quick-brown text, won't you test it?";
+const text = "I'm running and jumped over boxes. The box was huge!";
 console.log(tokenizer.tokenize(text))
