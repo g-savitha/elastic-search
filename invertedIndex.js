@@ -44,6 +44,10 @@ class InvertedIndex {
     const validTypes = ['OR', 'AND', 'PHRASE', 'PROXIMITY'];
     searchType = searchType.toUpperCase();
 
+    if (!validTypes.includes(searchType)) {
+      throw new Error(`Invalid search type. Must be one of: ${validTypes.join(', ')}`)
+    }
+
     try {
       switch (searchType) {
         case 'OR':
@@ -94,11 +98,10 @@ class InvertedIndex {
     tokens.forEach(token => {
       const documentsWithToken = this.getDocumentsForToken(token);
 
-      if (documentsWithToken) {
-        documentsWithToken.forEach((docInfo, docId) => {
-          this.updateMatchingDocs(matchingDocs, docId, token, docInfo);
-        })
-      }
+      documentsWithToken.forEach((docInfo, docId) => {
+        this.updateMatchingDocs(matchingDocs, docId, token, docInfo);
+      })
+
     })
     return matchingDocs;
 
@@ -127,11 +130,8 @@ class InvertedIndex {
 
     const results = new Map();
     const firstToken = tokens[0];
-
-
     // Get docs containing first token
     const docsWithFirst = this.getDocumentsForToken(firstToken)
-    if (!docsWithFirst) return results;
 
     docsWithFirst.forEach((docInfo, docId) => {
       // check each position of first token
@@ -142,8 +142,7 @@ class InvertedIndex {
             matchCount: tokens.length,
             terms: tokens,
             position: startPos,
-            type: 'phrase'
-
+            type: 'phrase',
           })
         }
       })
@@ -151,11 +150,15 @@ class InvertedIndex {
     return results;
   }
   checkPhraseMatch(tokens, docId, startPos) {
-    return tokens.every((token, index) => {
-      const docs = this.getDocumentsForToken(token);
+    for (let i = 0; i < tokens.length; i++) {
+      const docs = this.getDocumentsForToken(tokens[i]);
       const docInfo = docs.get(docId);
-      return docInfo && docInfo.positions.includes(startPos + index)
-    })
+
+      if (!docId || !docInfo.positions.includes(startPos + i)) {
+        return false;
+      }
+    }
+    return true;
   }
   searchProximity(query, maxDistance = 3) {
     const tokens = this.tokenizer.tokenize(query);
@@ -181,27 +184,29 @@ class InvertedIndex {
     const firstTokenDocs = this.getDocumentsForToken(tokens[0]);
     const secondTokenDocs = this.getDocumentsForToken(tokens[1]);
 
+
     const firstPositions = firstTokenDocs.get(docId)?.positions || [];
     const secondPositions = secondTokenDocs.get(docId)?.positions || [];
 
     let minDistance = Infinity;
-
     let matchedPositions = [];
 
-    firstPositions.forEach(pos1 => {
-      secondPositions.forEach(pos2 => {
+    for (let pos1 of firstPositions) {
+      for (let pos2 of secondPositions) {
         const distance = Math.abs(pos1 - pos2);
         if (distance <= maxDistance && distance < minDistance) {
           minDistance = distance;
           matchedPositions = [pos1, pos2];
         }
-      });
-    });
-
-    return minDistance !== Infinity ? {
-      distance: minDistance,
-      matchedPositions
-    } : null;
+      }
+    }
+    if (minDistance <= maxDistance) {
+      return {
+        distance: minDistance,
+        matchedPositions
+      }
+    }
+    return null;
   }
 }
 
@@ -215,5 +220,7 @@ index.addDocument(4, "A fox and a dog are friends");
 
 console.log(index.searchDocument("fox dog", "OR"));
 console.log(index.searchDocument("quick brown", "AND"));
+console.log("Phrase Search (brown fox):");
 console.log(index.searchDocument("brown fox", "PHRASE"));
+console.log("\nProximity Search (fox dog):");
 console.log(index.searchDocument("fox dog", "PROXIMITY"));
