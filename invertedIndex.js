@@ -37,55 +37,183 @@ class InvertedIndex {
 
   }
   searchDocument(query, searchType = 'OR') {
-    const tokens = this.tokenizer.tokenize(query);
+    if (!query || typeof query !== 'string') {
+      throw new Error('Search query must be a non empty string')
+    }
 
+    const validTypes = ['OR', 'AND', 'PHRASE', 'PROXIMITY'];
+    searchType = searchType.toUpperCase();
+
+    try {
+      switch (searchType) {
+        case 'OR':
+          return this.searchOr(query);
+        case 'AND':
+          return this.searchAnd(query);
+        case 'PHRASE':
+          return this.searchPhrase(query);
+        case 'PROXIMITY':
+          return this.searchProximity(query); //default distance of 3 words
+        default:
+          return this.searchOr(query);
+      }
+    }
+    catch (error) {
+      console.error(`Search error: ${error.message}`);
+      return new Map();
+    }
+  }
+  // helper method to find documents containing a token
+  getDocumentsForToken(token) {
+    return this.index.get(token) || new Map();
+  }
+  // helper method to update matching documents
+  updateMatchingDocs(matchingDocs, docId, token, docInfo) {
+    if (!matchingDocs.has(docId)) {
+      matchingDocs.set(docId, {
+        matchCount: 1,
+        terms: [token],
+        totalFrequency: docInfo.frequency,
+        positions: [docInfo.positions]
+      })
+    }
+    else {
+      const docMatch = matchingDocs.get(docId);
+      docMatch.matchCount += 1;
+      docMatch.terms.push(token);
+      docMatch.totalFrequency += docInfo.frequency;
+      docMatch.positions.push(docInfo.positions);
+    }
+  }
+
+  searchOr(query) {
+    const tokens = this.tokenizer.tokenize(query);
     // for each token get all the documents containing it
     const matchingDocs = new Map();
-    // collect the matching documents
+
     tokens.forEach(token => {
-      const documentsWithToken = this.index.get(token);
+      const documentsWithToken = this.getDocumentsForToken(token);
 
       if (documentsWithToken) {
         documentsWithToken.forEach((docInfo, docId) => {
-          if (!matchingDocs.has(docId)) {
-            matchingDocs.set(docId, {
-              matchCount: 1,
-              terms: [token],
-              totalFrequency: docInfo.frequency
-            });
-          }
-          else {
-            // document already matched another term
-            const docMatch = matchingDocs.get(docId);
-            docMatch.matchCount += 1;
-            docMatch.terms.push(token);
-            docMatch.totalFrequency += docInfo.frequency;
-          }
+          this.updateMatchingDocs(matchingDocs, docId, token, docInfo);
         })
       }
     })
-    // filter based on search type
+    return matchingDocs;
+
+  }
+  searchAnd(query) {
+    const tokens = this.tokenizer.tokenize(query);
+    const matchingDocs = new Map();
+
+    tokens.forEach(token => {
+      const documentsWithToken = this.getDocumentsForToken(token);
+
+      documentsWithToken.forEach((docInfo, docId) => {
+        this.updateMatchingDocs(matchingDocs, docId, token, docInfo);
+      })
+    })
+    return new Map(
+      Array.from(matchingDocs).filter(([_, info]) =>
+        info.matchCount === tokens.length
+      )
+    )
+  }
+  // searching for exact phrase
+  searchPhrase(query) {
+    const tokens = this.tokenizer.tokenize(query);
+    if (tokens.length === 0) return new Map();
+
     const results = new Map();
-    matchingDocs.forEach((matchInfo, docId) => {
-      if (searchType === 'AND' && matchInfo.matchCount === tokens.length) {
-        // document contains ALL search terms
-        results.set(docId, matchInfo);
-      }
-      else if (searchType === 'OR') {
-        // contains ANY search term
-        results.set(docId, matchInfo);
+    const firstToken = tokens[0];
+
+
+    // Get docs containing first token
+    const docsWithFirst = this.getDocumentsForToken(firstToken)
+    if (!docsWithFirst) return results;
+
+    docsWithFirst.forEach((docInfo, docId) => {
+      // check each position of first token
+      docInfo.positions.forEach(startPos => {
+        // check if subsequent tokens appear in sequence
+        if (this.checkPhraseMatch(tokens, docId, startPos)) {
+          results.set(docId, {
+            matchCount: tokens.length,
+            terms: tokens,
+            position: startPos,
+            type: 'phrase'
+
+          })
+        }
+      })
+    })
+    return results;
+  }
+  checkPhraseMatch(tokens, docId, startPos) {
+    return tokens.every((token, index) => {
+      const docs = this.getDocumentsForToken(token);
+      const docInfo = docs.get(docId);
+      return docInfo && docInfo.positions.includes(startPos + index)
+    })
+  }
+  searchProximity(query, maxDistance = 3) {
+    const tokens = this.tokenizer.tokenize(query);
+    if (tokens.length < 2) return new Map();
+
+    const results = new Map();
+    const andResults = this.searchAnd(query);
+
+    andResults.forEach((matchInfo, docId) => {
+      // for each document, check token positions
+      const proximityMatch = this.findProximityMatch(tokens, docId, maxDistance);
+      if (proximityMatch) {
+        results.set(docId, {
+          ...matchInfo,
+          ...proximityMatch,
+          type: 'proximity'
+        })
       }
     })
     return results;
+  }
+  findProximityMatch(tokens, docId, maxDistance) {
+    const firstTokenDocs = this.getDocumentsForToken(tokens[0]);
+    const secondTokenDocs = this.getDocumentsForToken(tokens[1]);
 
+    const firstPositions = firstTokenDocs.get(docId)?.positions || [];
+    const secondPositions = secondTokenDocs.get(docId)?.positions || [];
+
+    let minDistance = Infinity;
+
+    let matchedPositions = [];
+
+    firstPositions.forEach(pos1 => {
+      secondPositions.forEach(pos2 => {
+        const distance = Math.abs(pos1 - pos2);
+        if (distance <= maxDistance && distance < minDistance) {
+          minDistance = distance;
+          matchedPositions = [pos1, pos2];
+        }
+      });
+    });
+
+    return minDistance !== Infinity ? {
+      distance: minDistance,
+      matchedPositions
+    } : null;
   }
 }
 
 const index = new InvertedIndex();
 
-index.addDocument(1, "The cat chases mice");
-index.addDocument(2, "The playful mice");
-index.addDocument(3, "The cat sleeps");
+index.addDocument(1, "The quick brown fox jumps over the lazy dog");
+index.addDocument(2, "Quick brown foxes are jumping over lazy dogs");
+index.addDocument(3, "The brown dog sleeps while the fox jumps");
+index.addDocument(4, "A fox and a dog are friends");
 
-const results = index.searchDocument("cat mouse", "AND");
-console.log(results);
+
+console.log(index.searchDocument("fox dog", "OR"));
+console.log(index.searchDocument("quick brown", "AND"));
+console.log(index.searchDocument("brown fox", "PHRASE"));
+console.log(index.searchDocument("fox dog", "PROXIMITY"));
